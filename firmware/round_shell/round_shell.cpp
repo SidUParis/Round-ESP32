@@ -540,9 +540,12 @@ void snapshot() {
     puts("ROUND_FRAME_ERROR no-buffer");
     return;
   }
-  flockfile(stdout);
-  printf("ROUND_FRAME_BEGIN %u %u %u %lu\n", frame->header.w, frame->header.h,
-         frame->header.stride, (unsigned long)frame->data_size);
+  uint32_t checksum = 2166136261u;
+  for (uint32_t i = 0; i < frame->data_size; ++i)
+    checksum = (checksum ^ frame->data[i]) * 16777619u;
+  printf("ROUND_FRAME_BEGIN %u %u %u %lu %08lx\n", frame->header.w,
+         frame->header.h, frame->header.stride, (unsigned long)frame->data_size,
+         (unsigned long)checksum);
   constexpr char HEX[] = "0123456789abcdef";
   char line[1050];
   for (uint32_t i = 0; i < frame->data_size; i += 256) {
@@ -558,7 +561,6 @@ void snapshot() {
     vTaskDelay(1);
   }
   puts("ROUND_FRAME_END");
-  funlockfile(stdout);
   if (esp_lv_adapter_lock(1000) == ESP_OK) {
     lv_draw_buf_destroy(frame);
     esp_lv_adapter_unlock();

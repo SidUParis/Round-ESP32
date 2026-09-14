@@ -22,6 +22,10 @@ class Port:
 
 
 class SerialRecords(unittest.TestCase):
+    def test_frame_checksum_known_vectors(self):
+        self.assertEqual(device.checksum32(b""), 0x811C9DC5)
+        self.assertEqual(device.checksum32(b"hello"), 0x4F9F2CAB)
+
     def test_partial_record_survives_timeout(self):
         reader = device.BufferedLines(Port([b"ROUND_DATA 0 ab", b"", b"cd\n"]))
         self.assertEqual(reader.readline(), b"")

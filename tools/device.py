@@ -25,6 +25,13 @@ class BufferedLines:
         return bytes(line)
 
 
+def checksum32(data):
+    value = 2166136261
+    for byte in data:
+        value = ((value ^ byte) * 16777619) & 0xFFFFFFFF
+    return value
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["status", "snap", "home", "apps", "settings", "key1", "key2"])
@@ -60,6 +67,8 @@ def main():
     frame = None
     seen = set()
     info = None
+    expected_checksum = None
+    retries = 0
     while time.monotonic() < end:
         line = reader.readline().decode("ascii", errors="replace").strip()
         if line.startswith("ROUND_UI ") and args.then_snap:
@@ -67,10 +76,13 @@ def main():
             args.then_snap = False
             args.command = "snap"
         if line.startswith("ROUND_FRAME_BEGIN "):
-            width, height, stride, size = map(int, line.split()[1:])
+            fields = line.split()
+            width, height, stride, size = map(int, fields[1:5])
+            expected_checksum = int(fields[5], 16) if len(fields) >= 6 else None
             if not 0 < size <= 2_000_000:
                 raise ValueError("Invalid frame size")
             frame = bytearray(size)
+            seen.clear()
             info = (width, height, stride)
         elif line.startswith("ROUND_DATA ") and frame is not None:
             record = re.match(r"ROUND_DATA (\d+) ([0-9a-f]+)", line)
@@ -78,23 +90,35 @@ def main():
                 continue
             offset = int(record[1])
             value = record[2]
-            if len(value) % 2:
-                raise ValueError("Corrupt screenshot record")
+            count = min(256, len(frame) - offset)
+            if offset < 0 or count <= 0 or len(value) < count * 2:
+                continue
+            value = value[:count * 2]  # Ignore log text appended after a complete record.
             data = bytes.fromhex(value)
             if offset < 0 or offset+len(data) > len(frame):
                 raise ValueError("Invalid frame chunk")
             frame[offset:offset+len(data)] = data
             seen.update(range(offset, offset+len(data)))
-        elif line == "ROUND_FRAME_END":
-            if frame is None or len(seen) != len(frame):
-                raise ValueError("Incomplete screenshot")
+        elif line.startswith("ROUND_FRAME_END"):
+            valid = frame is not None and len(seen) == len(frame)
+            if valid and expected_checksum is not None:
+                valid = checksum32(frame) == expected_checksum
+            if not valid:
+                if retries >= 2:
+                    raise ValueError("Incomplete or corrupt screenshot after three attempts")
+                retries += 1
+                frame = None
+                port.write(b"round snap\n")
+                end = time.monotonic() + 60
+                continue
             args.output.write_bytes(frame)
             args.output.with_suffix(".txt").write_text(f"width={info[0]} height={info[1]} stride={info[2]} format=RGB565LE\n")
             print(f"Saved {len(frame)} bytes: {args.output}")
             return
         elif line.startswith("ROUND_STATUS"):
-            print(line)
-            return
+            if args.command == "status":
+                print(line)
+                return
         elif line.startswith("ROUND_FRAME_ERROR"):
             raise RuntimeError(line)
     port.close()
