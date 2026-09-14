@@ -1,0 +1,141 @@
+diff --git a/firmware/brookesia/components/XiaozhiApp/XiaozhiApp.cpp b/firmware/brookesia/components/XiaozhiApp/XiaozhiApp.cpp
+index 7f8fa51..cf782a6 100644
+--- a/firmware/brookesia/components/XiaozhiApp/XiaozhiApp.cpp
++++ b/firmware/brookesia/components/XiaozhiApp/XiaozhiApp.cpp
+@@ -576,6 +576,7 @@ bool XiaozhiApp::resume()
+ void XiaozhiApp::createUi()
+ {
+     destroyUi();
++    if (_round_embedded) return; // Round shell remains on the same desktop.
+     if (!_ui) {
+         return;
+     }
+@@ -654,6 +655,20 @@ void XiaozhiApp::refreshUi()
+     );
+ }
+ 
++// Round ESP32: nonblocking UI snapshot; no transport credentials are exposed.
++bool XiaozhiApp::round_snapshot(RoundSnapshot &out)
++{
++    out.state = static_cast<int>(_state.load());
++    strlcpy(out.status, stateText(_state.load()), sizeof(out.status));
++    if (!_state_mutex || xSemaphoreTake(_state_mutex, 0) != pdTRUE) return false;
++    strlcpy(out.text, _chat_text, sizeof(out.text));
++    if (_state.load() == State::ActivationRequired)
++        strlcpy(out.activation, _activation_code, sizeof(out.activation));
++    xSemaphoreGive(_state_mutex);
++    return true;
++}
++const lv_font_t *XiaozhiApp::round_font() const { return _ui ? _ui->round_font() : nullptr; }
++
+ void XiaozhiApp::setState(State state)
+ {
+     _state.store(state);
+diff --git a/firmware/brookesia/components/XiaozhiApp/XiaozhiApp.hpp b/firmware/brookesia/components/XiaozhiApp/XiaozhiApp.hpp
+index 6fe4def..eaca8e5 100644
+--- a/firmware/brookesia/components/XiaozhiApp/XiaozhiApp.hpp
++++ b/firmware/brookesia/components/XiaozhiApp/XiaozhiApp.hpp
+@@ -32,6 +32,13 @@ public:
+     static XiaozhiApp *requestInstance(bool use_status_bar = false, bool use_navigation_bar = false);
+     ~XiaozhiApp();
+ 
++    // Round ESP32 integration: preserve the original control task and lifecycle.
++    struct RoundSnapshot { int state=0; char status[96]={}; char text[512]={}; char activation[64]={}; };
++    void round_set_embedded(bool value) { _round_embedded=value; }
++    void round_press() { uiActionCallback(this); }
++    bool round_snapshot(RoundSnapshot &out);
++    const lv_font_t *round_font() const;
++
+ protected:
+     XiaozhiApp(bool use_status_bar, bool use_navigation_bar);
+ 
+@@ -131,6 +138,7 @@ private:
+ 
+     static XiaozhiApp *_instance;
+ 
++    bool _round_embedded = false;
+     lv_obj_t *_page_root = nullptr;
+     lv_timer_t *_ui_timer = nullptr;
+     XiaozhiUi *_ui = nullptr;
+diff --git a/firmware/brookesia/components/XiaozhiApp/XiaozhiUi.hpp b/firmware/brookesia/components/XiaozhiApp/XiaozhiUi.hpp
+index b119074..aec59b9 100644
+--- a/firmware/brookesia/components/XiaozhiApp/XiaozhiUi.hpp
++++ b/firmware/brookesia/components/XiaozhiApp/XiaozhiUi.hpp
+@@ -24,6 +24,8 @@ public:
+     XiaozhiUi &operator=(const XiaozhiUi &) = delete;
+ 
+     bool preload();
++    // Round ESP32: share the already-loaded conversation font.
++    const lv_font_t *round_font() const { return _text_font; }
+     bool create(
+         lv_obj_t *parent,
+         ActionCallback action_callback,
+diff --git a/firmware/brookesia/main/CMakeLists.txt b/firmware/brookesia/main/CMakeLists.txt
+index f0062c8..0b9702d 100644
+--- a/firmware/brookesia/main/CMakeLists.txt
++++ b/firmware/brookesia/main/CMakeLists.txt
+@@ -8,7 +8,7 @@ idf_component_register(
+         bsp_extra
+         ButtonTest
+         Crosshair
+-        draw
++        round_shell
+         espressif__esp_lvgl_adapter
+         Gravitysphere
+         Gallery
+diff --git a/firmware/brookesia/main/main.cpp b/firmware/brookesia/main/main.cpp
+index fd317f2..cce7c8d 100644
+--- a/firmware/brookesia/main/main.cpp
++++ b/firmware/brookesia/main/main.cpp
+@@ -19,7 +19,7 @@
+ #include "freertos/task.h"
+ #include "nvs_flash.h"
+ 
+-#include "Drawpanel.hpp"
++#include "round_shell.hpp" // Round ESP32 custom desktop
+ #include "Gallery.hpp"
+ #include "MusicPlayer.hpp"
+ #include "Recorder.hpp"
+@@ -670,10 +670,6 @@ extern "C" void app_main(void)
+         install_app(apps::Calculator::requestInstance(), "Calculator"),
+         "Install Calculator failed"
+     );
+-    ESP_UTILS_CHECK_FALSE_EXIT(
+-        install_app(apps::Drawpanel::requestInstance(), "DrawPanel"),
+-        "Install DrawPanel failed"
+-    );
+     ESP_UTILS_CHECK_FALSE_EXIT(
+         install_app(apps::SpecAnalyzer::requestInstance(), "SpecAnalyzer"),
+         "Install SpecAnalyzer failed"
+@@ -742,6 +738,7 @@ extern "C" void app_main(void)
+ 
+     // Wi-Fi callbacks and the status bar service are now initialized, so user
+     // interaction can safely enter Settings or launch an application.
++    round_shell_start(phone); // Round ESP32: native LVGL shell, original apps retained.
+     input_guard.enable();
+     ESP_UTILS_LOGI("Brookesia firmware is ready");
+ }
+diff --git a/firmware/brookesia/sdkconfig.defaults b/firmware/brookesia/sdkconfig.defaults
+index 065a912..c8b7fe9 100644
+--- a/firmware/brookesia/sdkconfig.defaults
++++ b/firmware/brookesia/sdkconfig.defaults
+@@ -25,7 +25,8 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=20480
+ CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
+ CONFIG_ESP32S3_DATA_CACHE_64KB=y
+ CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
+-CONFIG_ESP_CONSOLE_UART_CUSTOM=y
++# CONFIG_ESP_CONSOLE_UART_CUSTOM is not set
++CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+ CONFIG_ESP_CONSOLE_UART_BAUDRATE=2000000
+ CONFIG_FREERTOS_HZ=1000
+ CONFIG_VFS_MAX_COUNT=20
+@@ -77,7 +78,8 @@ CONFIG_BOOST_SERIALIZATION_ENABLED=n
+ 
+ # AIChats wake word (WakeNet 9: "Ni Hao Xiao Zhi") and local UI defaults.
+ CONFIG_SR_WN_WN9_NIHAOXIAOZHI_TTS=y
+-CONFIG_XIAOZHI_APP_UI_LANGUAGE_ENGLISH=y
++# CONFIG_XIAOZHI_APP_UI_LANGUAGE_ENGLISH is not set
++CONFIG_XIAOZHI_APP_UI_LANGUAGE_SIMPLIFIED_CHINESE=y
+ CONFIG_XIAOZHI_APP_TRANSPORT_WEBSOCKET=y
+ CONFIG_XIAOZHI_INFO_TIMEOUT_MS=8000
+ 

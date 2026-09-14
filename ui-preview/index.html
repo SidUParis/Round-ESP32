@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Round — 圆屏交互原型</title>
+    <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="companion.css" />
+    <link rel="icon" href="data:," />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="#" aria-label="Round 首页"
+        ><span class="brand-ring"></span>round<span class="brand-dot"
+          >.</span
+        ></a
+      ><span class="header-note">为你的 ESP32 设计</span
+      ><span class="version">伴侣原型 · 02</span>
+    </header>
+    <main class="workbench">
+      <section class="intro">
+        <div class="intro-line"><span></span> 手机、电脑，与你之间</div>
+        <h1>在你身边。<br /><span>与你同频。</span></h1>
+        <p class="intro-copy">
+          开口就聊，随乐而动。<br />把手机和电脑的状态，轻轻放在眼前。
+        </p>
+        <nav class="screen-nav" aria-label="预览页面">
+          <button data-view="home" class="active">
+            <span>01</span>桌面<svg><use href="#i-arrow" /></svg>
+          </button>
+          <button data-view="music">
+            <span>02</span>音乐伴侣<svg><use href="#i-arrow" /></svg>
+          </button>
+          <button data-view="devices">
+            <span>03</span>设备连接<svg><use href="#i-arrow" /></svg>
+          </button>
+          <button data-view="computer">
+            <span>04</span>电脑看板<svg><use href="#i-arrow" /></svg>
+          </button>
+          <button data-view="apps">
+            <span>05</span>应用<svg><use href="#i-arrow" /></svg>
+          </button>
+        </nav>
+        <p class="scope-note">
+          浏览器演示 · 尚未烧录到设备<br />连接、音乐与额度均为演示；不录音、不读取账号。
+        </p>
+      </section>
+      <section class="preview-column" aria-label="466 像素圆屏预览">
+        <div class="device-stage" id="stage">
+          <div class="device" id="device">
+            <div class="case-mark top"></div>
+            <div class="case-mark bottom"></div>
+            <button
+              class="hardware-key key-one"
+              id="key-one"
+              aria-label="实体键一：唤醒或返回桌面"
+              title="PWR：唤醒 / 返回"
+            ></button
+            ><button
+              class="hardware-key key-two"
+              id="key-two"
+              aria-label="实体键二：对话或播放暂停"
+              title="BOOT：对话 / 播放暂停"
+            ></button>
+            <div class="screen" id="screen">
+              <svg class="edge-ring" viewBox="0 0 466 466" aria-hidden="true">
+                <circle cx="233" cy="233" r="218" />
+                <circle class="progress-arc" cx="233" cy="233" r="218" />
+              </svg>
+              <div class="island" id="island">
+                <button
+                  id="island-toggle"
+                  class="island-toggle"
+                  aria-label="展开动态状态区"
+                  aria-expanded="false"
+                >
+                  <span class="island-symbol" id="island-symbol"></span
+                  ><span class="island-label" id="island-label"></span
+                  ><span class="island-tail" id="island-tail"></span>
+                </button>
+                <div id="island-body" class="island-body" hidden></div>
+              </div>
+              <div id="view" class="view"></div>
+              <button class="home-gesture" id="home" aria-label="回到桌面">
+                <span></span>
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="hardware-legend">
+          <button id="key-one-demo"><span>1</span>唤醒 / 返回</button
+          ><button id="key-two-demo"><span>2</span>对话 / 播放暂停</button>
+        </div>
+        <div class="preview-caption">
+          <span class="live-dot"></span
+          ><span id="caption">轻触圆心，直接开始对话</span>
+        </div>
+        <div class="device-spec">
+          <span>1.75″ AMOLED</span><i></i><span>466 × 466 px</span><i></i
+          ><span>圆形可视区域</span>
+        </div>
+      </section>
+      <aside class="details">
+        <div class="detail-index">
+          <span id="view-number">01 / 05</span><span class="tiny-line"></span>
+        </div>
+        <h2 id="detail-title">对话，就在桌面。</h2>
+        <p id="detail-copy">
+          无需进入应用。对话在圆心展开，连接和播放状态留在上方，随时可以打断或继续。
+        </p>
+        <div class="detail-rule"></div>
+        <div class="setting-label">连接场景 <small>模拟</small></div>
+        <div class="scenario-control" role="group" aria-label="模拟连接场景">
+          <button data-scenario="none">未连接</button
+          ><button data-scenario="phone" class="selected">手机</button
+          ><button data-scenario="computer">电脑</button>
+        </div>
+        <div class="scenario-note" id="scenario-note">
+          手机伴侣 · BLE 连接示意
+        </div>
+        <div class="setting-label palette-label">界面色彩</div>
+        <div class="palette">
+          <button
+            class="swatch jade selected"
+            data-theme="jade"
+            aria-label="青玉配色"
+            aria-pressed="true"
+          ></button
+          ><button
+            class="swatch amber"
+            data-theme="amber"
+            aria-label="暖琥珀配色"
+            aria-pressed="false"
+          ></button
+          ><span id="theme-label">青玉</span>
+        </div>
+        <label class="motion-toggle"
+          ><span>界面动效</span
+          ><input type="checkbox" id="motion" checked /><span
+            class="switch"
+          ></span
+        ></label>
+        <button class="tour-button" id="tour">
+          <svg><use href="#i-play" /></svg><span>播放交互导览</span>
+        </button>
+        <p class="detail-foot">
+          可以直接点击圆屏。<br />顶部状态区可展开。<br />两个侧键也可以直接点击。
+        </p>
+      </aside>
+    </main>
+    <footer>
+      <span>ROUND ESP32</span>
+      <p>轻量、可打断、与你的设备相连。</p>
+      <span>A SMALLER, CLOSER COMPANION</span>
+    </footer>
+    <svg
+      class="icon-library"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+    >
+      <defs>
+        <symbol id="i-arrow" viewBox="0 0 24 24">
+          <path d="M5 12h14m-6-6 6 6-6 6" />
+        </symbol>
+        <symbol id="i-back" viewBox="0 0 24 24">
+          <path d="m14 6-6 6 6 6" />
+        </symbol>
+        <symbol id="i-wifi" viewBox="0 0 24 24">
+          <path
+            d="M3 9a14 14 0 0 1 18 0M6 13a9 9 0 0 1 12 0m-9 4a4 4 0 0 1 6 0"
+          />
+          <circle cx="12" cy="20" r=".6" />
+        </symbol>
+        <symbol id="i-battery" viewBox="0 0 24 24">
+          <rect x="2" y="7" width="18" height="10" rx="3" />
+          <path d="M23 10v4M6 10v4m4-4v4m4-4v4" />
+        </symbol>
+        <symbol id="i-grid" viewBox="0 0 24 24">
+          <rect x="4" y="4" width="6" height="6" rx="2" />
+          <rect x="14" y="4" width="6" height="6" rx="2" />
+          <rect x="4" y="14" width="6" height="6" rx="2" />
+          <rect x="14" y="14" width="6" height="6" rx="2" />
+        </symbol>
+        <symbol id="i-ai" viewBox="0 0 24 24">
+          <path d="M12 3c0 6-3 9-9 9 6 0 9 3 9 9 0-6 3-9 9-9-6 0-9-3-9-9Z" />
+        </symbol>
+        <symbol id="i-music" viewBox="0 0 24 24">
+          <path d="M9 17V6l11-2v11M9 9l11-2" />
+          <ellipse cx="6" cy="18" rx="3" ry="2.5" />
+          <ellipse cx="17" cy="16" rx="3" ry="2.5" />
+        </symbol>
+        <symbol id="i-settings" viewBox="0 0 24 24">
+          <path d="M4 6h16M4 12h16M4 18h16" />
+          <rect x="7" y="4" width="4" height="4" rx="1" />
+          <rect x="14" y="10" width="4" height="4" rx="1" />
+          <rect x="6" y="16" width="4" height="4" rx="1" />
+        </symbol>
+        <symbol id="i-mic" viewBox="0 0 24 24">
+          <rect x="9" y="3" width="6" height="12" rx="3" />
+          <path d="M5 11v1a7 7 0 0 0 14 0v-1m-7 8v3m-4 0h8" />
+        </symbol>
+        <symbol id="i-play" viewBox="0 0 24 24">
+          <path d="m8 5 11 7-11 7Z" />
+        </symbol>
+        <symbol id="i-pause" viewBox="0 0 24 24">
+          <path d="M8 5v14M16 5v14" />
+        </symbol>
+        <symbol id="i-next" viewBox="0 0 24 24">
+          <path d="m5 5 10 7-10 7ZM19 5v14" />
+        </symbol>
+        <symbol id="i-prev" viewBox="0 0 24 24">
+          <path d="m19 5-10 7 10 7ZM5 5v14" />
+        </symbol>
+        <symbol id="i-sun" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="4" />
+          <path
+            d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1 1m12 12 1 1M5 19l1-1M18 6l1-1"
+          />
+        </symbol>
+        <symbol id="i-volume" viewBox="0 0 24 24">
+          <path
+            d="M4 9h4l5-4v14l-5-4H4Zm13-1a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"
+          />
+        </symbol>
+
+        <symbol id="i-wave" viewBox="0 0 24 24">
+          <path d="M3 10v4m4-8v12m5-16v20m5-16v12m4-8v4" />
+        </symbol>
+        <symbol id="i-video" viewBox="0 0 24 24">
+          <rect x="3" y="4" width="18" height="16" rx="4" />
+          <path d="m10 8 6 4-6 4Z" />
+        </symbol>
+        <symbol id="i-gravity" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="9" />
+          <ellipse
+            cx="12"
+            cy="12"
+            rx="9"
+            ry="3.5"
+            transform="rotate(-35 12 12)"
+          />
+          <circle cx="12" cy="12" r="2" />
+        </symbol>
+        <symbol id="i-bluetooth" viewBox="0 0 24 24">
+          <path d="m6 6 12 12-6 4V2l6 4L6 18" />
+        </symbol>
+        <symbol id="i-phone" viewBox="0 0 24 24">
+          <rect x="6" y="2" width="12" height="20" rx="3" />
+          <path d="M10 5h4m-3 14h2" />
+        </symbol>
+        <symbol id="i-computer" viewBox="0 0 24 24">
+          <rect x="3" y="3" width="18" height="13" rx="2" />
+          <path d="M12 16v5m-5 0h10" />
+        </symbol>
+        <symbol id="i-link" viewBox="0 0 24 24">
+          <path
+            d="m9 15 6-6M8 16l-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0m2 10a4 4 0 0 0 6 0l4-4a4 4 0 0 0-6-6l-1 1"
+            transform="translate(1 0) scale(.92)"
+          />
+        </symbol>
+        <symbol id="i-close" viewBox="0 0 24 24">
+          <path d="m6 6 12 12M6 18 18 6" />
+        </symbol>
+        <symbol id="i-check" viewBox="0 0 24 24">
+          <path d="m5 12 4 4L19 6" />
+        </symbol>
+        <symbol id="i-power" viewBox="0 0 24 24">
+          <path d="M12 2v10m-5-7a9 9 0 1 0 10 0" />
+        </symbol>
+      </defs>
+    </svg>
+    <script src="app.js"></script>
+  </body>
+</html>

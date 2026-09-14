@@ -1,0 +1,9 @@
+{
+  "upstream_url": "https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-1.75.git",
+  "upstream_commit": "e4344e70c2fa78a13e8a06566507f1ba8af6672a",
+  "esp_idf_version": "v5.5.4",
+  "esp_idf_commit": "735507283d5b2f9fb363a1901172dbd9e847945d",
+  "target": "esp32s3",
+  "flash_bytes": 16777216,
+  "version": "0.1.0-alpha.1"
+}

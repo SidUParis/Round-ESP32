@@ -1,0 +1,13 @@
+Round ESP32
+Copyright 2026 Round ESP32 contributors
+
+The firmware is built on the Waveshare ESP32-S3-Touch-AMOLED-1.75
+Brookesia project, pinned in source.lock.json. Upstream applications and
+hardware drivers retain their Espressif, Waveshare, and other authorship
+and licenses. This project adds the Round desktop and integration changes.
+It is not an official Waveshare or Espressif product.
+
+Round UI bitmap fonts are subsets of Noto Sans CJK SC, distributed under
+the SIL Open Font License 1.1. See firmware/round_shell/FONT-LICENSE.txt.
+Managed ESP-IDF components retain their respective upstream licenses;
+building this project does not relicense those dependencies.

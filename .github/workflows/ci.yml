@@ -1,0 +1,28 @@
+name: Build and check
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  tools:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - run: python3 -m unittest discover -s tests -v
+      - run: node --check ui-preview/app.js
+      - run: git diff --check
+  firmware:
+    runs-on: ubuntu-latest
+    container: espressif/idf:v5.5.4
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Prepare pinned upstream and build
+        shell: bash
+        run: |
+          . /opt/esp/idf/export.sh
+          python tools/prepare_firmware.py --destination /tmp/round-upstream
+          idf.py -C /tmp/round-upstream/firmware/brookesia -B /tmp/round-build build
+          python tools/package.py --build-dir /tmp/round-build --output-dir /tmp/round-release
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: round-esp32-firmware
+          path: /tmp/round-release/*
