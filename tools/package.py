@@ -34,9 +34,11 @@ def main():
         bundle.write(ROOT / "firmware/round_shell/FONT-LICENSE.txt", "licenses/round-fonts.txt")
         description = json.loads((args.build_dir / "project_description.json").read_text())
         for directory in description.get("build_component_paths", []):
+            if not directory:
+                continue  # An empty component path must never scan the caller's directory.
             directory = Path(directory)
             for file in directory.rglob("*"):
-                if file.is_file() and file.name.upper().startswith(("LICENSE", "LICENCE", "COPYING")):
+                if file.is_file() and file.name.upper().startswith(("LICENSE", "LICENCE", "COPYING", "NOTICE")):
                     bundle.write(file, "licenses/" + directory.name + "/" + str(file.relative_to(directory)))
         bundle.writestr("INSTALL.txt", "Install esptool 5.4.0 and pyserial 3.5 in a Python environment.\n"
                         "From this extracted directory run:\n"
