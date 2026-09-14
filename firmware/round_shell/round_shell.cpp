@@ -283,9 +283,24 @@ void make_apps() {
   const int begin = app_page * 4;
   for (int j = 0; j < 4 && begin + j < (int)installed.size(); j++) {
     App *a = installed[begin + j];
-    auto *b = button(app_title(a), 109 + (j % 2) * 133, 139 + (j / 2) * 110,
-                     115, 86, OPEN_APP, begin + j);
-    lv_obj_set_style_bg_color(b, lv_color_hex(j == 1 ? 0x302b20 : 0x172d25), 0);
+    auto *b = box(root, 109 + (j % 2) * 133, 135 + (j / 2) * 112, 115, 100, BG);
+    action(b, OPEN_APP, begin + j);
+    const uint32_t colors[] = {0x193a2c, 0x332c20, 0x203340, 0x362638};
+    auto *tile = box(b, 26, 0, 63, 63, colors[j], 21);
+    lv_obj_remove_flag(tile, LV_OBJ_FLAG_CLICKABLE);
+    const char *name = a->getName();
+    const char *symbol = strstr(name, "Settings")   ? LV_SYMBOL_SETTINGS
+                         : strstr(name, "Music")    ? LV_SYMBOL_AUDIO
+                         : strstr(name, "Gravity")  ? LV_SYMBOL_GPS
+                         : strstr(name, "Spec")     ? LV_SYMBOL_VOLUME_MAX
+                         : strstr(name, "Video")    ? LV_SYMBOL_VIDEO
+                         : strstr(name, "Gallery")  ? LV_SYMBOL_IMAGE
+                         : strstr(name, "Recorder") ? LV_SYMBOL_CALL
+                                                    : LV_SYMBOL_BARS;
+    auto *glyph =
+        label(tile, symbol, 0, 16, 63, &lv_font_montserrat_28, ACCENT);
+    lv_obj_remove_flag(glyph, LV_OBJ_FLAG_CLICKABLE);
+    label(b, app_title(a), 0, 72, 115, &round_font_18);
   }
   button("上一页", 94, 376, 91, 38, APPS, -1);
   button("返回", 190, 376, 86, 38, HOME);
@@ -525,6 +540,7 @@ void snapshot() {
     puts("ROUND_FRAME_ERROR no-buffer");
     return;
   }
+  flockfile(stdout);
   printf("ROUND_FRAME_BEGIN %u %u %u %lu\n", frame->header.w, frame->header.h,
          frame->header.stride, (unsigned long)frame->data_size);
   constexpr char HEX[] = "0123456789abcdef";
@@ -542,6 +558,7 @@ void snapshot() {
     vTaskDelay(1);
   }
   puts("ROUND_FRAME_END");
+  funlockfile(stdout);
   if (esp_lv_adapter_lock(1000) == ESP_OK) {
     lv_draw_buf_destroy(frame);
     esp_lv_adapter_unlock();
@@ -607,6 +624,18 @@ void round_shell_start(Phone *p) {
     if (a)
       installed.push_back(a);
   }
+  // Keep daily tools ahead of upstream diagnostic/demo applications.
+  auto rank = [](App *a) {
+    const char *keys[] = {"AIChats",  "Xiaozhi",   "Settings", "Music",
+                          "Gravity",  "Spec",      "Video",    "Gallery",
+                          "Recorder", "Calculator"};
+    for (int i = 0; i < 10; ++i)
+      if (strstr(a->getName(), keys[i]))
+        return i;
+    return 20;
+  };
+  std::stable_sort(installed.begin(), installed.end(),
+                   [&](App *a, App *b) { return rank(a) < rank(b); });
   if (esp_lv_adapter_lock(-1) != ESP_OK)
     return;
   root = box(lv_layer_top(), 0, 0, 466, 466, BG, 233);

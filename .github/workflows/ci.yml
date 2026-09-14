@@ -2,6 +2,9 @@ name: Build and check
 on: [push, pull_request, workflow_dispatch]
 permissions:
   contents: read
+concurrency:
+  group: round-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   tools:
     runs-on: ubuntu-latest

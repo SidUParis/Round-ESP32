@@ -3,7 +3,26 @@
 import argparse
 from pathlib import Path
 import time
+import re
 import serial
+
+
+class BufferedLines:
+    """Keep partial USB records across serial read timeouts."""
+    def __init__(self, port):
+        self.port = port
+        self.buffer = bytearray()
+
+    def readline(self):
+        if b"\n" not in self.buffer:
+            self.buffer.extend(self.port.read(min(4096, max(1, self.port.in_waiting))))
+        if b"\n" not in self.buffer:
+            if len(self.buffer) > 65536:
+                raise ValueError("Oversized USB record")
+            return b""
+        line, _, remainder = self.buffer.partition(b"\n")
+        self.buffer = bytearray(remainder)
+        return bytes(line)
 
 
 def main():
@@ -19,6 +38,7 @@ def main():
     port.port = args.port
     port.open()
     port.reset_input_buffer()
+    reader = BufferedLines(port)
     # Opening USB Serial/JTAG can reset the chip. Wait for the application,
     # rather than losing the first command during its seven-second startup.
     deadline = time.monotonic() + 20
@@ -27,7 +47,7 @@ def main():
         if time.monotonic() >= next_probe:
             port.write(b"round status\n")
             next_probe = time.monotonic() + 1
-        line = port.readline().decode("ascii", errors="replace").strip()
+        line = reader.readline().decode("ascii", errors="replace").strip()
         if line.startswith("ROUND_STATUS"):
             if args.command == "status":
                 print(line)
@@ -41,7 +61,7 @@ def main():
     seen = set()
     info = None
     while time.monotonic() < end:
-        line = port.readline().decode("ascii", errors="replace").strip()
+        line = reader.readline().decode("ascii", errors="replace").strip()
         if line.startswith("ROUND_UI ") and args.then_snap:
             port.write(b"round snap\n")
             args.then_snap = False
@@ -53,8 +73,13 @@ def main():
             frame = bytearray(size)
             info = (width, height, stride)
         elif line.startswith("ROUND_DATA ") and frame is not None:
-            _, offset, value = line.split()
-            offset = int(offset)
+            record = re.match(r"ROUND_DATA (\d+) ([0-9a-f]+)", line)
+            if not record:
+                continue
+            offset = int(record[1])
+            value = record[2]
+            if len(value) % 2:
+                raise ValueError("Corrupt screenshot record")
             data = bytes.fromhex(value)
             if offset < 0 or offset+len(data) > len(frame):
                 raise ValueError("Invalid frame chunk")
