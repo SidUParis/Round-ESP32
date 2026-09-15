@@ -43,6 +43,7 @@ def main():
         bundle.writestr("INSTALL.txt", "Install esptool 5.4.0 and pyserial 3.5 in a Python environment.\n"
                         "From this extracted directory run:\n"
                         "python flash.py --build-dir . --port YOUR_PORT\n"
+                        "python device.py time --port YOUR_PORT  # set time and timezone, stored for reboot\n"
                         "This reads a private full backup before writing, and preserves configuration partitions.\n"
                         "Only use on the 16 MiB ESP32-S3-Touch-AMOLED-1.75.\n")
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()

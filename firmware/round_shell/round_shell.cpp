@@ -14,6 +14,7 @@
 #include "esp_timer.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
+#include "round_clock.hpp"
 #include "system_status.hpp"
 #include <algorithm>
 #include <atomic>
@@ -33,8 +34,11 @@ using AI = esp_brookesia::apps::XiaozhiApp;
 constexpr const char *TAG = "Round";
 constexpr uint32_t BG = 0x080f10, ACCENT = 0xa6ead6, MUTED = 0x6f9584;
 Phone *phone;
-lv_obj_t *root, *clock_label, *headline, *subtitle, *orb_button, *orbit,
-    *island, *island_label, *reply;
+lv_obj_t *root, *chrome, *chrome_header, *clock_label, *date_label, *headline,
+    *subtitle, *orb_button, *orbit, *island, *island_icon, *island_label,
+    *wifi_detail, *battery_detail, *detail_hint, *reply, *orb_image_obj;
+int chrome_mode = -1;
+bool orb_small = false;
 lv_obj_t *bars[3];
 lv_draw_buf_t *orb_background = nullptr;
 lv_image_dsc_t orb_background_image{};
@@ -46,6 +50,7 @@ int app_page = 0, idle_index = 0, last_ai_state = -1;
 uint32_t last_copy = 0, last_clock = 0, transient_until = 0, last_status = 0;
 char last_text[512] = {}, transient[100] = {};
 std::vector<App *> installed;
+std::vector<lv_obj_t *> covered_children;
 struct Command {
   int kind;
   int value;
@@ -64,7 +69,7 @@ void queue(int kind, int value = 0) {
     ESP_LOGW(TAG, "Input queue full");
 }
 void hidden(lv_obj_t *obj, bool hide) {
-  if (!obj)
+  if (!obj || lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN) == hide)
     return;
   if (hide)
     lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
@@ -132,7 +137,29 @@ App *find_app(const char *needle) {
       return a;
   return nullptr;
 }
+// Screen roots have no parent: changing their HIDDEN flag is not a supported
+// layout operation in this LVGL version. Cover only live child objects and
+// restore them before the app manager can destroy or replace a screen.
+void uncover_scene() {
+  for (auto *child : covered_children) {
+    if (lv_obj_is_valid(child))
+      hidden(child, false);
+  }
+  covered_children.clear();
+}
+void cover_scene() {
+  uncover_scene();
+  auto *screen = lv_screen_active();
+  for (uint32_t i = 0; i < lv_obj_get_child_count(screen); i++) {
+    auto *child = lv_obj_get_child(screen, i);
+    if (!lv_obj_has_flag(child, LV_OBJ_FLAG_HIDDEN)) {
+      covered_children.push_back(child);
+      hidden(child, true);
+    }
+  }
+}
 void stop_active() {
+  uncover_scene();
   auto *a = phone->getManager().getActiveApp();
   if (a) {
     Context::AppEventData e{a->getId(), Context::AppEventType::STOP, nullptr};
@@ -156,6 +183,8 @@ void launch(App *a, bool embedded = false) {
     notify("应用启动失败");
     return;
   }
+  if (embedded)
+    cover_scene();
   embedded_ai = embedded;
   pending_ai = embedded;
   last_ai_state = -1;
@@ -180,6 +209,7 @@ void make_home(bool stop = true) {
   }
   hidden(root, false);
   home = true;
+  cover_scene(); // Do not repaint the covered Brookesia launcher.
   status_open = false;
   auto *edge = lv_arc_create(root);
   clean(edge);
@@ -194,14 +224,13 @@ void make_home(bool stop = true) {
   lv_obj_set_style_arc_color(edge, lv_color_hex(ACCENT), LV_PART_INDICATOR);
   lv_obj_remove_style(edge, nullptr, LV_PART_KNOB);
   lv_obj_remove_flag(edge, LV_OBJ_FLAG_CLICKABLE);
-  island = box(root, 215, 37, 36, 34, 0x101e19, 17);
-  action(island, STATUS);
-  island_label =
-      label(island, LV_SYMBOL_WIFI, 0, 8, 36, &lv_font_montserrat_16, MUTED);
-  clock_label = label(root, "ROUND", 70, 91, 326, &lv_font_montserrat_44);
-  label(root, "R O U N D", 100, 148, 266, &lv_font_montserrat_12, MUTED);
-  orb_button = box(root, 165, 184, 136, 136, 0x0d211e, 68);
+  clock_label = label(root, "--:--", 70, 91, 326, &lv_font_montserrat_48);
+  date_label = label(root, "等待校时", 53, 153, 360, &round_font_18, MUTED);
+  orb_button = box(root, 165, 184, 136, 136, BG, 0);
   action(orb_button, VOICE);
+  auto *base_circle = box(orb_button, 0, 0, 136, 136, 0x0d211e, 68);
+  lv_obj_remove_flag(base_circle, LV_OBJ_FLAG_CLICKABLE);
+  orb_small = false;
   for (int i = 0; i < 5; i++) {
     auto *c = box(orb_button, 8 + i * 8, 8 + i * 8, 120 - i * 16, 120 - i * 16,
                   0x163c33 + i * 0x020604, 70);
@@ -213,10 +242,10 @@ void make_home(bool stop = true) {
   if (orb_background) {
     lv_obj_clean(orb_button);
     lv_draw_buf_to_image(orb_background, &orb_background_image);
-    auto *image = lv_image_create(orb_button);
-    lv_image_set_src(image, &orb_background_image);
-    lv_obj_set_style_clip_corner(orb_button, true, 0);
-    lv_obj_remove_flag(image, LV_OBJ_FLAG_CLICKABLE);
+    orb_image_obj = lv_image_create(orb_button);
+    lv_image_set_src(orb_image_obj, &orb_background_image);
+    lv_obj_set_style_clip_corner(orb_button, false, 0);
+    lv_obj_remove_flag(orb_image_obj, LV_OBJ_FLAG_CLICKABLE);
   }
   orbit = lv_arc_create(orb_button);
   clean(orbit);
@@ -246,6 +275,7 @@ void make_home(bool stop = true) {
   button("设置", 237, 404, 72, 35, OPEN_APP, -1);
   last_copy = lv_tick_get();
   last_clock = 0;
+  last_status = 0;
   last_ai_state = -1;
   last_text[0] = 0;
   ESP_LOGI(TAG, "HOME ready");
@@ -276,10 +306,10 @@ void make_apps() {
   stop_active();
   wake();
   home = false;
+  cover_scene();
   lv_obj_clean(root);
   hidden(root, false);
-  island = nullptr;
-  label(root, "随身工具", 83, 65, 300, &round_font_24);
+  label(root, "随身工具", 83, 97, 300, &round_font_24);
   const int begin = app_page * 4;
   for (int j = 0; j < 4 && begin + j < (int)installed.size(); j++) {
     App *a = installed[begin + j];
@@ -324,6 +354,7 @@ void voice() {
   launch(AI::requestInstance(), true);
 }
 void handle(Command c) {
+  last_status = 0;
   if (c.kind == HOME) {
     make_home();
     return;
@@ -377,6 +408,104 @@ void handle(Command c) {
     return;
   }
 }
+void create_chrome() {
+  chrome = lv_obj_create(lv_layer_top());
+  clean(chrome);
+  lv_obj_set_size(chrome, 466, 466);
+  lv_obj_set_pos(chrome, 0, 0);
+  lv_obj_remove_flag(chrome, LV_OBJ_FLAG_CLICKABLE);
+  chrome_header = box(chrome, 0, 0, 466, 80, BG);
+  lv_obj_remove_flag(chrome_header, LV_OBJ_FLAG_CLICKABLE);
+  island = box(chrome, 215, 39, 36, 36, 0x14251e, 18);
+  action(island, STATUS);
+  lv_obj_set_style_border_width(island, 1, 0);
+  lv_obj_set_style_border_color(island, lv_color_hex(0x36584b), 0);
+  island_icon =
+      label(island, LV_SYMBOL_WIFI, 0, 10, 36, &lv_font_montserrat_16, MUTED);
+  island_label = label(island, "", 39, 11, 207, &round_font_18);
+  lv_label_set_long_mode(island_label, LV_LABEL_LONG_DOT);
+  lv_obj_set_height(island_label, 24);
+  wifi_detail = label(island, "", 15, 62, 234, &round_font_18);
+  battery_detail = label(island, "", 15, 100, 234, &round_font_18);
+  detail_hint = label(island, "轻触收起", 15, 144, 234, &round_font_18, MUTED);
+  hidden(island_label, true);
+  hidden(wifi_detail, true);
+  hidden(battery_detail, true);
+  hidden(detail_hint, true);
+}
+void update_chrome(uint32_t now) {
+  hidden(chrome, sleeping);
+  hidden(chrome_header, !lv_obj_has_flag(root, LV_OBJ_FLAG_HIDDEN));
+  if (sleeping || now - last_status < 250)
+    return;
+  last_status = now;
+  auto *old = phone->getDisplay().getStatusBar();
+  if (old && old->checkVisible())
+    old->setVisualMode(
+        esp_brookesia::systems::phone::StatusBar::VisualMode::HIDE);
+  if (status_open && (int32_t)(transient_until - now) <= 0)
+    status_open = false;
+  AI::RoundSnapshot ai{};
+  bool ai_active =
+      embedded_ai && AI::requestInstance()->round_snapshot(ai) && ai.state != 4;
+  int mode = status_open                                           ? 2
+             : (ai_active || (int32_t)(transient_until - now) > 0) ? 1
+                                                                   : 0;
+  brookesia::system_status::Snapshot status{};
+  brookesia::system_status::get_snapshot(status);
+  if (mode != chrome_mode) {
+    chrome_mode = mode;
+    lv_anim_delete(island, nullptr);
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, island);
+    lv_anim_set_duration(&a, 240);
+    lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+    lv_anim_set_values(&a, lv_obj_get_width(island),
+                       mode == 2   ? 264
+                       : mode == 1 ? 244
+                                   : 36);
+    lv_anim_set_exec_cb(&a, [](void *o, int32_t v) {
+      auto *obj = static_cast<lv_obj_t *>(o);
+      lv_obj_set_width(obj, v);
+      lv_obj_set_x(obj, (466 - v) / 2);
+    });
+    lv_anim_start(&a);
+    lv_anim_set_values(&a, lv_obj_get_height(island),
+                       mode == 2   ? 184
+                       : mode == 1 ? 44
+                                   : 36);
+    lv_anim_set_exec_cb(&a, [](void *o, int32_t v) {
+      lv_obj_set_height(static_cast<lv_obj_t *>(o), v);
+    });
+    lv_anim_start(&a);
+    hidden(island_label, mode == 0);
+    hidden(wifi_detail, mode != 2);
+    hidden(battery_detail, mode != 2);
+    hidden(detail_hint, mode != 2);
+    lv_obj_set_x(island_icon, mode ? 10 : 0);
+  }
+  const lv_color_t color = lv_color_hex(status.wifi_connected ? ACCENT : MUTED);
+  if (!lv_color_eq(lv_obj_get_style_text_color(island_icon, LV_PART_MAIN),
+                   color))
+    lv_obj_set_style_text_color(island_icon, color, 0);
+  set_text(island_icon, ai_active ? LV_SYMBOL_AUDIO : LV_SYMBOL_WIFI);
+  if (mode == 1)
+    set_text(island_label, ai_active ? ai.status : transient);
+  if (mode == 2) {
+    set_text(island_label, "连接与电量");
+    set_text(wifi_detail,
+             status.wifi_connected ? "Wi-Fi  已连接" : "Wi-Fi  未连接");
+    char battery[64];
+    if (status.battery_present && status.battery_valid)
+      snprintf(battery, sizeof(battery), "%s  %d%%",
+               status.charging ? "正在充电" : "剩余电量",
+               status.battery_percent);
+    else
+      snprintf(battery, sizeof(battery), "USB 供电 / 电量未知");
+    set_text(battery_detail, battery);
+  }
+}
 void tick(lv_timer_t *) {
   Command c;
   while (xQueueReceive(commands, &c, 0) == pdTRUE) {
@@ -386,19 +515,28 @@ void tick(lv_timer_t *) {
   if (!embedded_ai && lv_obj_has_flag(root, LV_OBJ_FLAG_HIDDEN) &&
       !phone->getManager().getActiveApp())
     make_home(false);
+  const uint32_t now = lv_tick_get();
+  update_chrome(now);
   if (!home || sleeping || lv_obj_has_flag(root, LV_OBJ_FLAG_HIDDEN))
     return;
-  const uint32_t now = lv_tick_get();
   if (now - last_clock >= 1000 || last_clock == 0) {
     time_t t = time(nullptr);
     tm tm{};
     localtime_r(&t, &tm);
     char clock[32];
     if (tm.tm_year < 124)
-      snprintf(clock, sizeof(clock), "ROUND");
+      snprintf(clock, sizeof(clock), "--:--");
     else
       strftime(clock, sizeof(clock), "%H:%M", &tm);
     set_text(clock_label, clock);
+    char date[80];
+    const char *weekdays[] = {"日", "一", "二", "三", "四", "五", "六"};
+    if (tm.tm_year >= 124)
+      snprintf(date, sizeof(date), "%d月%d日 · 星期%s", tm.tm_mon + 1,
+               tm.tm_mday, weekdays[tm.tm_wday]);
+    else
+      snprintf(date, sizeof(date), "等待校时");
+    set_text(date_label, date);
     last_clock = now;
   }
   AI::RoundSnapshot ai{};
@@ -421,14 +559,23 @@ void tick(lv_timer_t *) {
       set_text(reply, content);
     }
     const lv_font_t *font = AI::requestInstance()->round_font();
-    if (font)
+    if (font && lv_obj_get_style_text_font(reply, LV_PART_MAIN) != font)
       lv_obj_set_style_text_font(reply, font, 0);
     hidden(reply, !has_text);
     hidden(headline, has_text);
     hidden(subtitle, has_text);
-    lv_obj_set_y(orb_button, has_text ? 146 : 184);
-    lv_obj_set_style_transform_scale_x(orb_button, has_text ? 180 : 256, 0);
-    lv_obj_set_style_transform_scale_y(orb_button, has_text ? 180 : 256, 0);
+    if (has_text != orb_small) {
+      orb_small = has_text;
+      const int size = has_text ? 104 : 136;
+      lv_obj_set_size(orb_button, size, size);
+      lv_obj_set_pos(orb_button, (466 - size) / 2, has_text ? 156 : 184);
+      if (orb_image_obj)
+        lv_image_set_scale(orb_image_obj, has_text ? 196 : 256);
+      lv_obj_set_size(orbit, has_text ? 94 : 122, has_text ? 94 : 122);
+      lv_obj_center(orbit);
+      for (int i = 0; i < 3; i++)
+        lv_obj_set_x(bars[i], size / 2 - 18 + i * 13);
+    }
     if (!has_text)
       set_text(subtitle, "再次轻触控制 · 按键 1 退出");
   } else if (now - last_copy >= 14000) {
@@ -436,51 +583,32 @@ void tick(lv_timer_t *) {
     set_text(headline, INVITATIONS[idle_index]);
     set_text(subtitle, HINTS[idle_index]);
     last_copy = now;
-    lv_obj_fade_in(headline, 650, 0);
-    lv_obj_fade_in(subtitle, 650, 0);
+    lv_anim_t fade;
+    lv_anim_init(&fade);
+    lv_anim_set_var(&fade, headline);
+    lv_anim_set_values(&fade, 0, 255);
+    lv_anim_set_duration(&fade, 400);
+    lv_anim_set_exec_cb(&fade, [](void *o, int32_t value) {
+      lv_obj_set_style_text_color(
+          static_cast<lv_obj_t *>(o),
+          lv_color_mix(lv_color_hex(0xd7e5dc), lv_color_hex(MUTED), value), 0);
+    });
+    lv_anim_start(&fade);
   }
-  const int angle = (now / (active ? 12 : 55)) % 360;
+  const int angle = (now / (active ? 12 : 20)) % 360;
   lv_arc_set_rotation(orbit, angle);
   for (int i = 0; i < 3; i++) {
     int h = active   ? 14 + (int)(22 * (.5 + .5 * std::sin(now / 190.0 + i)))
             : i == 1 ? 34
                      : 22;
-    lv_obj_set_height(bars[i], h);
-    lv_obj_set_y(bars[i], (136 - h) / 2);
-  }
-  if (now - last_status >= 500) {
-    brookesia::system_status::Snapshot s{};
-    brookesia::system_status::get_snapshot(s);
-    bool show = active || status_open || (int32_t)(transient_until - now) > 0;
-    lv_obj_set_width(island, show ? 244 : 36);
-    lv_obj_set_x(island, show ? 111 : 215);
-    lv_obj_set_width(island_label, show ? 232 : 36);
-    lv_obj_set_x(island_label, show ? 6 : 0);
-    char text[128];
-    if (active)
-      snprintf(text, sizeof(text), "%s", ai.status);
-    else if (status_open) {
-      char battery[28];
-      if (s.battery_valid && s.battery_present)
-        snprintf(battery, sizeof(battery), "%s %d%%",
-                 s.charging ? "充电" : "电量", s.battery_percent);
-      else
-        snprintf(battery, sizeof(battery), "USB / --");
-      snprintf(text, sizeof(text), "Wi-Fi %s  %s",
-               s.wifi_connected ? "已连接" : "未连接", battery);
-    } else if (show)
-      snprintf(text, sizeof(text), "%s", transient);
-    else
-      snprintf(text, sizeof(text), "%s",
-               s.wifi_connected ? LV_SYMBOL_WIFI : LV_SYMBOL_BLUETOOTH);
-    lv_obj_set_style_text_font(
-        island_label, show ? &round_font_18 : &lv_font_montserrat_16, 0);
-    set_text(island_label, text);
-    if (status_open && (int32_t)(transient_until - now) < 0)
-      status_open = false;
-    last_status = now;
+    if (lv_obj_get_height(bars[i]) != h)
+      lv_obj_set_height(bars[i], h);
+    const int y = ((orb_small ? 104 : 136) - h) / 2;
+    if (lv_obj_get_y(bars[i]) != y)
+      lv_obj_set_y(bars[i], y);
   }
 }
+
 void key_task(void *) {
   esp_io_expander_handle_t expander = nullptr;
   bool pwr_ok =
@@ -531,9 +659,33 @@ void key_task(void *) {
 void snapshot() {
   lv_draw_buf_t *frame = nullptr;
   if (esp_lv_adapter_lock(1000) == ESP_OK) {
-    frame = lv_snapshot_take(
-        lv_obj_has_flag(root, LV_OBJ_FLAG_HIDDEN) ? lv_screen_active() : root,
-        LV_COLOR_FORMAT_RGB565);
+    if (!lv_obj_has_flag(root, LV_OBJ_FLAG_HIDDEN)) {
+      frame = lv_snapshot_take(lv_layer_top(), LV_COLOR_FORMAT_RGB565);
+    } else {
+      auto *active = lv_screen_active();
+      lv_area_t area{};
+      lv_obj_get_coords(active, &area);
+      auto *app_frame = lv_snapshot_take(active, LV_COLOR_FORMAT_RGB565);
+      auto *chrome_frame = lv_snapshot_take(chrome, LV_COLOR_FORMAT_ARGB8888);
+      if (app_frame && chrome_frame) {
+        auto *surface = box(nullptr, 0, 0, 466, 466, BG);
+        lv_image_dsc_t app_image{}, chrome_image{};
+        lv_draw_buf_to_image(app_frame, &app_image);
+        lv_draw_buf_to_image(chrome_frame, &chrome_image);
+        auto *app = lv_image_create(surface);
+        lv_image_set_src(app, &app_image);
+        lv_obj_set_pos(app, area.x1, area.y1);
+        auto *overlay = lv_image_create(surface);
+        lv_image_set_src(overlay, &chrome_image);
+        lv_obj_set_pos(overlay, 0, 0);
+        frame = lv_snapshot_take(surface, LV_COLOR_FORMAT_RGB565);
+        lv_obj_delete(surface);
+      }
+      if (app_frame)
+        lv_draw_buf_destroy(app_frame);
+      if (chrome_frame)
+        lv_draw_buf_destroy(chrome_frame);
+    }
     esp_lv_adapter_unlock();
   }
   if (!frame) {
@@ -599,12 +751,23 @@ void serial_task(void *) {
         queue(KEY2);
       else if (!strcmp(command, "round settings"))
         queue(OPEN_APP, -1);
-      else if (!strcmp(command, "round status")) {
-        printf("ROUND_STATUS version=0.1.0 chip=esp32s3 pwr=%d boot=%d "
-               "internal_free=%u psram_free=%u\n",
+      else if (!strncmp(command, "round time ", 11)) {
+        long long epoch;
+        char zone[96], extra;
+        bool ok =
+            sscanf(command + 11, "%lld %95s %c", &epoch, zone, &extra) == 2 &&
+            round_clock_sync(time_t(epoch), zone);
+        printf("ROUND_TIME ok=%d rtc=%d epoch=%lld source=%s\n", ok,
+               round_clock_rtc_valid(), (long long)time(nullptr),
+               round_clock_source());
+      } else if (!strcmp(command, "round status")) {
+        printf("ROUND_STATUS version=0.1.0-alpha.2 chip=esp32s3 pwr=%d boot=%d "
+               "internal_free=%u psram_free=%u epoch=%lld clock=%s rtc=%d\n",
                raw_pwr.load(), raw_boot.load(),
                (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
-               (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+               (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+               (long long)time(nullptr), round_clock_source(),
+               round_clock_rtc_valid());
       }
       len = 0;
     } else if (len < sizeof(command) - 1)
@@ -638,15 +801,18 @@ void round_shell_start(Phone *p) {
   };
   std::stable_sort(installed.begin(), installed.end(),
                    [&](App *a, App *b) { return rank(a) < rank(b); });
+  round_clock_start();
   if (esp_lv_adapter_lock(-1) != ESP_OK)
     return;
-  root = box(lv_layer_top(), 0, 0, 466, 466, BG, 233);
-  lv_obj_set_style_clip_corner(root, true, 0);
+  root = box(lv_layer_top(), 0, 0, 466, 466, BG, 0);
+  create_chrome();
+  lv_obj_set_style_clip_corner(root, false,
+                               0); // The physical AMOLED masks its corners.
   make_home(false);
-  lv_timer_create(tick, 50, nullptr);
+  lv_timer_create(tick, 20, nullptr);
   esp_lv_adapter_unlock();
   xTaskCreate(key_task, "round_keys", 4096, nullptr, 4, nullptr);
   xTaskCreate(serial_task, "round_usb", 6144, nullptr, 3, nullptr);
-  ESP_LOGI(TAG, "READY version=0.1.0 apps=%u ui=466x466",
+  ESP_LOGI(TAG, "READY version=0.1.0-alpha.2 apps=%u ui=466x466",
            (unsigned)installed.size());
 }

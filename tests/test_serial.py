@@ -22,6 +22,10 @@ class Port:
 
 
 class SerialRecords(unittest.TestCase):
+    def test_host_timezone_keeps_dst_rules(self):
+        with patch.object(Path, "read_bytes", return_value=b"TZif2\0payload\nCET-1CEST,M3.5.0,M10.5.0/3\n"):
+            self.assertEqual(device.host_timezone(), "CET-1CEST,M3.5.0,M10.5.0/3")
+
     def test_frame_checksum_known_vectors(self):
         self.assertEqual(device.checksum32(b""), 0x811C9DC5)
         self.assertEqual(device.checksum32(b"hello"), 0x4F9F2CAB)

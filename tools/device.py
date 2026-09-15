@@ -5,6 +5,20 @@ from pathlib import Path
 import time
 import re
 import serial
+from datetime import datetime
+
+
+def host_timezone():
+    """Use the POSIX trailer of the host TZif, including DST transition rules."""
+    try:
+        data = Path("/etc/localtime").read_bytes()
+        zone = data.rsplit(b"\n", 2)[-2].decode("ascii")
+        if data.startswith(b"TZif") and re.fullmatch(r"[A-Za-z0-9+\-:,./<>]{1,95}", zone):
+            return zone
+    except (OSError, UnicodeError, IndexError):
+        pass
+    seconds = int(datetime.now().astimezone().utcoffset().total_seconds())
+    return f"UTC{'-' if seconds >= 0 else '+'}{abs(seconds)//3600}:{abs(seconds)%3600//60:02}"
 
 
 class BufferedLines:
@@ -34,7 +48,8 @@ def checksum32(data):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["status", "snap", "home", "apps", "settings", "key1", "key2"])
+    parser.add_argument("command", choices=["status", "snap", "home", "apps", "settings", "key1", "key2", "time"])
+    parser.add_argument("--timezone", default=None, help="POSIX timezone; defaults to host rules")
     parser.add_argument("--port", required=True)
     parser.add_argument("--output", type=Path, default=Path("round-screen.rgb565"))
     parser.add_argument("--then-snap", action="store_true", help="Capture after the UI command is acknowledged")
@@ -62,7 +77,13 @@ def main():
             break
     else:
         raise TimeoutError("Round firmware did not become ready")
-    port.write(f"round {args.command}\n".encode())
+    if args.command == "time":
+        zone = args.timezone or host_timezone()
+        if not re.fullmatch(r"[A-Za-z0-9+\-:,./<>]{1,95}", zone):
+            raise ValueError("Invalid POSIX timezone")
+        port.write(f"round time {int(time.time())} {zone}\n".encode())
+    else:
+        port.write(f"round {args.command}\n".encode())
     end = time.monotonic() + (60 if args.command == "snap" or args.then_snap else 5)
     frame = None
     seen = set()
@@ -71,6 +92,14 @@ def main():
     retries = 0
     while time.monotonic() < end:
         line = reader.readline().decode("ascii", errors="replace").strip()
+        if line.startswith("ROUND_TIME "):
+            print(line)
+            if "ok=1" not in line:
+                raise RuntimeError("Device time synchronization failed")
+            if args.then_snap:
+                port.write(b"round home\n")
+            else:
+                return
         if line.startswith("ROUND_UI ") and args.then_snap:
             port.write(b"round snap\n")
             args.then_snap = False
@@ -122,7 +151,7 @@ def main():
         elif line.startswith("ROUND_FRAME_ERROR"):
             raise RuntimeError(line)
     port.close()
-    if args.command in ("snap", "status"):
+    if args.command in ("snap", "status", "time") or args.then_snap:
         raise TimeoutError("No complete response from Round firmware")
     print("Command sent. Use status or snap to inspect the device.")
 

@@ -7,8 +7,8 @@ const state = {
   view: "home",
   page: 0,
   ai: "idle",
-  device: "phone",
-  bluetooth: true,
+  device: "none",
+  bluetooth: false,
   wifi: true,
   music: false,
   ambient: true,
@@ -151,7 +151,7 @@ function updateIsland() {
           : state.device === "phone"
             ? "phone"
             : "computer"
-        : "link",
+        : "wifi",
   );
   $("#island-label").textContent =
     phase ||

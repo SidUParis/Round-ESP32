@@ -3,7 +3,8 @@
 Round adds a native LVGL desktop over Waveshare's ESP-Brookesia application
 manager. Existing applications retain their lifecycle, drivers, and audio
 ownership. The desktop hides while a normal app is active and returns when it
-closes. The AI application can run beneath the desktop through a small,
+closes. A separate shared status component remains in the same position across
+all views, replacing the original application status bar. The AI application can run beneath the desktop through a small,
 nonblocking state interface; its original activation and transport code stays
 in control. Tapping the desktop starts this path, rather than a browser or a
 second standalone AI screen.
@@ -43,3 +44,5 @@ The full private backup provides the data needed for restoration.
 Never upload board flash dumps: they can contain network or account secrets.
 Release bundles are generated only from compiler outputs. ESP-IDF and managed
 vendor components keep their own licenses, including any binary SDK components.
+
+Clock handling and the measured rendering corrections are documented in [alpha 2 validation](alpha2-validation.md).

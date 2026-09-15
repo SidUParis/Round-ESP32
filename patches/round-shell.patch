@@ -116,7 +116,7 @@ index fd317f2..cce7c8d 100644
      ESP_UTILS_LOGI("Brookesia firmware is ready");
  }
 diff --git a/firmware/brookesia/sdkconfig.defaults b/firmware/brookesia/sdkconfig.defaults
-index 065a912..c8b7fe9 100644
+index 065a912..317c029 100644
 --- a/firmware/brookesia/sdkconfig.defaults
 +++ b/firmware/brookesia/sdkconfig.defaults
 @@ -25,7 +25,8 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=20480
@@ -139,3 +139,9 @@ index 065a912..c8b7fe9 100644
  CONFIG_XIAOZHI_APP_TRANSPORT_WEBSOCKET=y
  CONFIG_XIAOZHI_INFO_TIMEOUT_MS=8000
  
+@@ -103,3 +105,5 @@ CONFIG_FATFS_MAX_LFN=255
+ CONFIG_FATFS_CODEPAGE_936=y
+ CONFIG_FATFS_API_ENCODING_UTF_8=y
+ CONFIG_FATFS_FS_LOCK=16
++
++CONFIG_LV_FONT_MONTSERRAT_48=y

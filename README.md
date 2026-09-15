@@ -10,7 +10,8 @@ of replacing their hardware and AI implementations.
 ## Native alpha
 
 - Circular desktop with restrained motion and a slowly changing invitation.
-- Quiet connection indicator; status messages expand only when relevant.
+- One shared status area across the desktop and retained apps; status messages expand only when relevant.
+- Real local time/date from the board RTC, USB host synchronization, and NTP when Wi-Fi is available.
 - AI conversation presented on the desktop through the retained Xiaozhi engine.
 - Original Settings, Music Player, Gravity Sphere, Spec Analyzer and other
   useful applications. The drawing application is removed from the launcher.
@@ -75,6 +76,7 @@ else's backup or publish a device dump.
 
 ```sh
 python -m http.server 8765 --bind 127.0.0.1 --directory ui-preview
+python tools/device.py time --port /dev/ttyACM0  # Set time and persist host timezone/DST rules
 python tools/device.py status --port /dev/ttyACM0
 python tools/device.py snap --port /dev/ttyACM0 --output round-screen.rgb565
 ```
@@ -82,6 +84,10 @@ python tools/device.py snap --port /dev/ttyACM0 --output round-screen.rgb565
 Open [the local preview](http://127.0.0.1:8765/). It never records audio, pairs
 devices, reads account credentials, or changes the board. It illustrates design
 and future companion scenarios, not measured native frame rates.
+
+If no valid time is available, the screen shows `--:--` until synchronized.
+RTC data is stored in UTC; the timezone uses the host POSIX rules, including DST.
+A board without backup power may lose RTC time when all power is removed; USB or NTP can restore it.
 
 The USB console also accepts `round home`, `round apps`, `round settings`,
 `round key1` and `round key2`. The last command can activate real AI audio when
